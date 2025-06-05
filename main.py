@@ -4,6 +4,7 @@ import numpy as np
 from recognize import DigitRecognizer
 import torch
 
+# 可视化
 def visualize(image, predictions, output_path="result.jpg"):
     """改进的可视化函数：显示长宽比信息"""
     img = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)

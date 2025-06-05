@@ -23,6 +23,7 @@ class AddGaussianNoise(object):
     def __repr__(self):
         return f'{self.__class__.__name__}(mean={self.mean}, std={self.std})'
 
+# 数据增强
 class RandomStretchRotation:
     """随机拉伸和旋转变换"""
     def __init__(self, max_rotation=45, max_stretch=0.3):

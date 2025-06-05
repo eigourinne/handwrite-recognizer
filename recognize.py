@@ -5,6 +5,7 @@ import numpy as np
 from torchvision import transforms
 from models import EnhancedCNN
 
+# 识别器
 class DigitRecognizer:
     def __init__(self, model_path, device="cuda"):
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
