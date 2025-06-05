@@ -6,6 +6,9 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from models import EnhancedCNN
 import time
+import random
+import numpy as np
+from PIL import Image, ImageOps, ImageFilter
 
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1.):
@@ -13,41 +16,159 @@ class AddGaussianNoise(object):
         self.mean = mean
         
     def __call__(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std + self.mean
+        if isinstance(tensor, torch.Tensor):
+            return tensor + torch.randn(tensor.size()) * self.std + self.mean
+        return tensor
         
     def __repr__(self):
         return f'{self.__class__.__name__}(mean={self.mean}, std={self.std})'
 
+class RandomStretchRotation:
+    """随机拉伸和旋转变换"""
+    def __init__(self, max_rotation=45, max_stretch=0.3):
+        self.max_rotation = max_rotation
+        self.max_stretch = max_stretch
+        
+    def __call__(self, img):
+        # 随机选择拉伸类型：水平、垂直或双向
+        stretch_type = random.choice(['h', 'v', 'both'])
+        
+        # 随机拉伸因子
+        h_stretch = 1.0
+        v_stretch = 1.0
+        
+        if stretch_type == 'h' or stretch_type == 'both':
+            h_stretch = 1.0 + random.uniform(-self.max_stretch, self.max_stretch)
+        if stretch_type == 'v' or stretch_type == 'both':
+            v_stretch = 1.0 + random.uniform(-self.max_stretch, self.max_stretch)
+        
+        # 应用拉伸变换
+        if h_stretch != 1.0 or v_stretch != 1.0:
+            width, height = img.size
+            new_width = int(width * h_stretch)
+            new_height = int(height * v_stretch)
+            img = img.resize((new_width, new_height), Image.BILINEAR)
+            
+            # 调整回原始大小
+            img = img.resize((width, height), Image.BILINEAR)
+        
+        # 随机旋转
+        rotation_angle = random.uniform(-self.max_rotation, self.max_rotation)
+        if rotation_angle != 0:
+            img = img.rotate(rotation_angle, resample=Image.BILINEAR, expand=False, fillcolor=0)
+        
+        return img
+
+class PILGaussianBlur:
+    """适用于PIL图像的高斯模糊"""
+    def __init__(self, radius_min=0.1, radius_max=2.0):
+        self.radius_min = radius_min
+        self.radius_max = radius_max
+        
+    def __call__(self, img):
+        radius = random.uniform(self.radius_min, self.radius_max)
+        return img.filter(ImageFilter.GaussianBlur(radius))
+
+class PILRandomErasing:
+    """适用于PIL图像的随机擦除"""
+    def __init__(self, p=0.5, scale=(0.02, 0.3), ratio=(0.3, 3.3), value=0):
+        self.p = p
+        self.scale = scale
+        self.ratio = ratio
+        self.value = value
+        
+    def __call__(self, img):
+        if random.random() > self.p:
+            return img
+            
+        # 获取图像尺寸
+        width, height = img.size
+        
+        # 随机选择擦除区域的大小
+        area = width * height
+        target_area = random.uniform(self.scale[0], self.scale[1]) * area
+        aspect_ratio = random.uniform(self.ratio[0], self.ratio[1])
+        
+        # 计算擦除区域尺寸
+        h = int(round((target_area * aspect_ratio) ** 0.5))
+        w = int(round((target_area / aspect_ratio) ** 0.5))
+        
+        if w < width and h < height:
+            # 随机选择擦除位置
+            x1 = random.randint(0, width - w)
+            y1 = random.randint(0, height - h)
+            
+            # 创建擦除区域
+            erase_box = (x1, y1, x1 + w, y1 + h)
+            
+            # 创建擦除图像
+            erase_img = Image.new("L", (w, h), self.value)
+            
+            # 将擦除区域粘贴到原图上
+            img.paste(erase_img, erase_box)
+            
+        return img
+
 class MNISTWithAugmentation(Dataset):
-    def __init__(self, root, train=True, download=True):
+    def __init__(self, root, train=True, download=True, augment_ratio=0.5):
         self.base_dataset = torchvision.datasets.MNIST(
             root, train=train, download=download, transform=None)
         self.train = train
+        self.augment_ratio = augment_ratio
         
-        self.train_transform = transforms.Compose([
-            transforms.RandomRotation(15),
-            transforms.RandomAffine(10, translate=(0.1,0.1), scale=(0.9,1.1)),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2),
-            transforms.GaussianBlur(3, sigma=(0.1,1.0)),
-            transforms.ToTensor(),
-            transforms.RandomErasing(p=0.3, scale=(0.02,0.2), ratio=(0.3,3.3)),
-            transforms.Normalize((0.1307,), (0.3081,)),
-            AddGaussianNoise(0., 0.05)
-        ])
-        
-        self.test_transform = transforms.Compose([
+        # 基础变换
+        self.base_transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.1307,), (0.3081,))
         ])
         
+        # 增强变换 - 全部在PIL图像上操作
+        self.augment_transform = transforms.Compose([
+            RandomStretchRotation(max_rotation=45, max_stretch=0.3),
+            transforms.RandomAffine(
+                degrees=0,  # 因为旋转已经在RandomStretchRotation中处理
+                translate=(0.2, 0.2),
+                scale=(0.7, 1.3),
+                shear=20
+            ),
+            transforms.ColorJitter(brightness=0.3, contrast=0.3),
+            PILGaussianBlur(radius_min=0.1, radius_max=2.0),
+            PILRandomErasing(p=0.5, scale=(0.02, 0.3), ratio=(0.3, 3.3)),  # 使用自定义的PIL随机擦除
+            # 转换为张量并归一化
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,)),
+            AddGaussianNoise(0., 0.1)
+        ])
+        
+        # 创建增强样本
+        self.augmented_samples = []
+        if train:
+            self._create_augmented_samples()
+        
+    def _create_augmented_samples(self):
+        """创建增强样本并添加到数据集"""
+        num_augmented = int(len(self.base_dataset) * self.augment_ratio)
+        indices = random.sample(range(len(self.base_dataset)), num_augmented)
+        
+        for idx in indices:
+            img, label = self.base_dataset[idx]
+            # 应用增强变换
+            augmented_img = self.augment_transform(img)
+            self.augmented_samples.append((augmented_img, label))
+    
     def __len__(self):
-        return len(self.base_dataset)
+        return len(self.base_dataset) + len(self.augmented_samples)
         
     def __getitem__(self, idx):
-        img, label = self.base_dataset[idx]
-        if self.train:
-            return self.train_transform(img), label
-        return self.test_transform(img), label
+        if idx < len(self.base_dataset):
+            # 原始样本
+            img, label = self.base_dataset[idx]
+            return self.base_transform(img), label
+        else:
+            # 增强样本
+            aug_idx = idx - len(self.base_dataset)
+            img, label = self.augmented_samples[aug_idx]
+            return img, label
 
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,9 +176,12 @@ def train():
     if device.type == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name(0)}")
     
-    # 数据集
-    full_train_set = MNISTWithAugmentation('./data', train=True, download=True)
-    test_set = MNISTWithAugmentation('./data', train=False, download=True)
+    # 数据集 - 使用增强比例为0.5 (额外50%增强样本)
+    full_train_set = MNISTWithAugmentation('./data', train=True, download=True, augment_ratio=0.5)
+    test_set = MNISTWithAugmentation('./data', train=False, download=True, augment_ratio=0.0)
+    
+    print(f"训练集大小: {len(full_train_set)} (原始:60000 + 增强:{len(full_train_set)-60000})")
+    print(f"测试集大小: {len(test_set)}")
 
     # 分割数据集
     train_size = int(0.9 * len(full_train_set))
