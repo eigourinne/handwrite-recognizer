@@ -9,6 +9,8 @@ import time
 import random
 import numpy as np
 from PIL import Image, ImageOps, ImageFilter
+import torch.nn.functional as F
+import cv2
 
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1.):
@@ -110,6 +112,24 @@ class PILRandomErasing:
             
         return img
 
+class PILThinning:
+    """模拟细笔画效果"""
+    def __call__(self, img):
+        if random.random() < 0.3:  # 30%的概率应用细化
+            img_np = np.array(img)
+            thinned = cv2.ximgproc.thinning(
+                img_np, 
+                thinningType=cv2.ximgproc.THINNING_GUOHALL
+            )
+            return Image.fromarray(thinned)
+        return img
+
+class PILBlurVariation:
+    """增加模糊多样性"""
+    def __call__(self, img):
+        radius = random.choice([0.5, 1.0, 1.5, 2.0, 2.5, 3.0])  # 更多模糊级别
+        return img.filter(ImageFilter.GaussianBlur(radius))
+
 class MNISTWithAugmentation(Dataset):
     def __init__(self, root, train=True, download=True, augment_ratio=0.5):
         self.base_dataset = torchvision.datasets.MNIST(
@@ -134,6 +154,8 @@ class MNISTWithAugmentation(Dataset):
             ),
             transforms.ColorJitter(brightness=0.3, contrast=0.3),
             PILGaussianBlur(radius_min=0.1, radius_max=2.0),
+            PILThinning(),          # 新增：细笔画模拟
+            PILBlurVariation(),     # 新增：多样化模糊
             PILRandomErasing(p=0.5, scale=(0.02, 0.3), ratio=(0.3, 3.3)),  # 使用自定义的PIL随机擦除
             # 转换为张量并归一化
             transforms.ToTensor(),
@@ -171,6 +193,19 @@ class MNISTWithAugmentation(Dataset):
             img, label = self.augmented_samples[aug_idx]
             return img, label
 
+# 焦点损失函数（提高对困难样本的关注）
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=1, gamma=2):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1-pt)**self.gamma * ce_loss
+        return focal_loss.mean()
+
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -202,7 +237,8 @@ def train():
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.5, patience=3)
     
-    criterion = nn.CrossEntropyLoss()
+    # 使用焦点损失
+    criterion = FocalLoss(alpha=0.8, gamma=2.0)
     epochs = 100
     best_acc = 0.0
 
@@ -215,11 +251,30 @@ def train():
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(device), target.to(device)
             
-            optimizer.zero_grad()
+            # 前向传播
             output = model(data)
             loss = criterion(output, target)
+            
+            # 计算每个样本的损失
+            with torch.no_grad():
+                sample_loss = F.cross_entropy(output, target, reduction='none')
+            
+            # 反向传播
+            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            
+            # 困难样本挖掘
+            k = int(0.25 * len(sample_loss))
+            hard_indices = sample_loss.topk(k).indices
+            
+            if k > 0:
+                # 重新计算困难样本的损失
+                optimizer.zero_grad()
+                hard_output = model(data[hard_indices])
+                hard_loss = criterion(hard_output, target[hard_indices])
+                hard_loss.backward()
+                optimizer.step()
             
             total_loss += loss.item()
             
