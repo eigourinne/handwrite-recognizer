@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import os
 
+# 几何矫正
 class GeometricAdjuster:
     def __init__(self):
         self.points = []  # 存储选择的四个点
