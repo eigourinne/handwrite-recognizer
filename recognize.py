@@ -49,6 +49,8 @@ class DigitRecognizer:
                     results.append((pred.item(), rect, conf.item()))
         
         # 3. 后处理和结果返回
+        img = 255 - img # 反色操作（白底黑字 -> 黑底白字）
+
         return self._sort_results(results), img
 
     def _advanced_preprocess(self, img):
