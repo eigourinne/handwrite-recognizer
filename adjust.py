@@ -21,7 +21,7 @@ class GeometricAdjuster:
                 # 显示已选择的点数量
                 if len(self.points) > 0:
                     cv2.putText(self.original_img, f"Selected {len(self.points)}/4 points", 
-                               (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                               (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                     cv2.imshow(self.window_name, self.original_img)
     
     def _order_points(self, pts):
@@ -100,11 +100,11 @@ class GeometricAdjuster:
             if key == ord('r'):
                 self.points = []
                 display_img = self.original_img.copy()
-                cv2.putText(display_img, "Select 4 corners (clockwise or counter-clockwise)", 
-                           (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                cv2.putText(display_img, "Press 'r' to reset, 'c' to confirm, 'q' to quit", 
-                           (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                cv2.imshow(self.window_name, display_img)
+                # cv2.putText(display_img, "Select 4 corners (clockwise or counter-clockwise)", 
+                #            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                # cv2.putText(display_img, "Press 'r' to reset, 'c' to confirm, 'q' to quit", 
+                #            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                # cv2.imshow(self.window_name, display_img)
             
             # 确认选择并执行变换
             elif key == ord('c'):

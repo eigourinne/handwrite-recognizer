@@ -12,6 +12,7 @@ from PIL import Image, ImageOps, ImageFilter
 import torch.nn.functional as F
 import cv2
 
+# 添加高斯噪声
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1.):
         self.std = std
@@ -62,6 +63,7 @@ class RandomStretchRotation:
         
         return img
 
+# 高斯模糊
 class PILGaussianBlur:
     """适用于PIL图像的高斯模糊"""
     def __init__(self, radius_min=0.1, radius_max=2.0):
@@ -72,6 +74,7 @@ class PILGaussianBlur:
         radius = random.uniform(self.radius_min, self.radius_max)
         return img.filter(ImageFilter.GaussianBlur(radius))
 
+# 随机擦除
 class PILRandomErasing:
     """适用于PIL图像的随机擦除"""
     def __init__(self, p=0.5, scale=(0.02, 0.3), ratio=(0.3, 3.3), value=0):
@@ -112,6 +115,7 @@ class PILRandomErasing:
             
         return img
 
+# 细化增强
 class PILThinning:
     """模拟细笔画效果"""
     def __call__(self, img):
@@ -124,12 +128,14 @@ class PILThinning:
             return Image.fromarray(thinned)
         return img
 
+# 模糊算子列表
 class PILBlurVariation:
     """增加模糊多样性"""
     def __call__(self, img):
         radius = random.choice([0.5, 1.0, 1.5, 2.0, 2.5, 3.0])  # 更多模糊级别
         return img.filter(ImageFilter.GaussianBlur(radius))
 
+# mnist 手写数字数据集增强主程序
 class MNISTWithAugmentation(Dataset):
     def __init__(self, root, train=True, download=True, augment_ratio=0.5):
         self.base_dataset = torchvision.datasets.MNIST(
@@ -145,12 +151,12 @@ class MNISTWithAugmentation(Dataset):
         
         # 增强变换 - 全部在PIL图像上操作
         self.augment_transform = transforms.Compose([
-            RandomStretchRotation(max_rotation=45, max_stretch=0.3),
+            # 使用更自然的倾斜变换代替透视变换
             transforms.RandomAffine(
-                degrees=0,  # 因为旋转已经在RandomStretchRotation中处理
+                degrees=(-45, 45),  # 扩展旋转范围
                 translate=(0.2, 0.2),
                 scale=(0.7, 1.3),
-                shear=20
+                shear=(-30, 30)  # 增加倾斜范围
             ),
             transforms.ColorJitter(brightness=0.3, contrast=0.3),
             PILGaussianBlur(radius_min=0.1, radius_max=2.0),
@@ -206,6 +212,7 @@ class FocalLoss(nn.Module):
         focal_loss = self.alpha * (1-pt)**self.gamma * ce_loss
         return focal_loss.mean()
 
+# 训练逻辑
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -313,6 +320,7 @@ def train():
 
     print(f"Best test accuracy: {best_acc:.4f}")
 
+# 主程序
 if __name__ == '__main__':
     torch.manual_seed(42)
     if torch.cuda.is_available():

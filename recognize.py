@@ -48,7 +48,7 @@ class DigitRecognizer:
                 if conf.item() > min_conf:
                     results.append((pred.item(), rect, conf.item()))
         
-        # 3. 后处理和结果返回
+        # 3. 后处理和结果返回,保证和实例输出相同风格
         img = 255 - img # 反色操作（白底黑字 -> 黑底白字）
 
         return self._sort_results(results), img
@@ -125,26 +125,85 @@ class DigitRecognizer:
         return digits
 
     def _enhanced_standardization(self, digit_img):
-        """增强的标准化方法"""
+        """增强的标准化方法（包含旋转矫正）"""
         if len(digit_img.shape) == 3:
             digit_img = cv2.cvtColor(digit_img, cv2.COLOR_BGR2GRAY)
         
+        # 旋转矫正：二分法寻找最佳角度（-45°到45°）
+        def compute_vertical_response(img):
+            """计算垂直方向响应值"""
+            sobel_y = cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=3)
+            return np.sum(np.abs(sobel_y))
+        
+        def rotate_image(img, angle):
+            """旋转图像并保持内容完整"""
+            h, w = img.shape
+            center = (w // 2, h // 2)
+            M = cv2.getRotationMatrix2D(center, angle, 1.0)
+            cos = np.abs(M[0, 0])
+            sin = np.abs(M[0, 1])
+            nW = int((h * sin) + (w * cos))
+            nH = int((h * cos) + (w * sin))
+            M[0, 2] += (nW / 2) - center[0]
+            M[1, 2] += (nH / 2) - center[1]
+            return cv2.warpAffine(img, M, (nW, nH))
+        
+        # 跳过太小的图像（小于20像素）
+        h, w = digit_img.shape
+        if h < 20 or w < 20:
+            rotated_img = digit_img
+        else:
+            # 二分法寻找最佳旋转角度
+            best_angle = 0
+            best_response = 0
+            left, right = -45, 45
+            
+            # 初始计算（0度）
+            rotated = rotate_image(digit_img, 0)
+            _, binary = cv2.threshold(rotated, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            best_response = compute_vertical_response(binary)
+            
+            # 二分搜索（最多5次迭代）
+            for _ in range(5):
+                mid_left = (2 * left + right) / 3
+                mid_right = (left + 2 * right) / 3
+                
+                # 计算左侧角度响应
+                rotated = rotate_image(digit_img, mid_left)
+                _, binary = cv2.threshold(rotated, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                response_left = compute_vertical_response(binary)
+                
+                # 计算右侧角度响应
+                rotated = rotate_image(digit_img, mid_right)
+                _, binary = cv2.threshold(rotated, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                response_right = compute_vertical_response(binary)
+                
+                # 选择响应值更大的方向
+                if response_left > response_right:
+                    right = mid_right
+                    if response_left > best_response:
+                        best_response = response_left
+                        best_angle = mid_left
+                else:
+                    left = mid_left
+                    if response_right > best_response:
+                        best_response = response_right
+                        best_angle = mid_right
+            
+            # 应用最佳旋转角度
+            rotated_img = rotate_image(digit_img, best_angle)
+        
         # 多尺度处理
         scales = [0.8, 1.0, 1.2]
-        processed = []
+        canvas = np.zeros((28, 28), dtype=np.uint8)
         
         for scale in scales:
-            h, w = digit_img.shape
-            scaled = cv2.resize(digit_img, (int(w*scale), int(h*scale)))
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4,4))
+            h, w = rotated_img.shape
+            scaled = cv2.resize(rotated_img, (int(w * scale), int(h * scale)))
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
             norm = clahe.apply(scaled)
-            _, binary = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
-            processed.append(binary)
-        
-        # 多尺度融合
-        canvas = np.zeros((28,28), dtype=np.uint8)
-        for p in processed:
-            resized = cv2.resize(p, (28,28))
+            _, binary = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            resized = cv2.resize(binary, (28, 28))
             canvas = cv2.bitwise_or(canvas, resized)
         
         return canvas
