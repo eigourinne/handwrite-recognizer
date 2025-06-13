@@ -21,11 +21,13 @@ class DigitRecognizer:
         
         # 用于保存处理过程图像的列表
         self.process_images = []
+        self.after_process_images = []  # 新增：用于保存阈值处理后的图像
 
     def find_and_recognize(self, image_path):
         """主识别流程"""
         # 重置处理过程图像列表
         self.process_images = []
+        self.after_process_images = []  # 重置
         
         # 1. 图像读取和预处理
         img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
@@ -37,18 +39,31 @@ class DigitRecognizer:
         
         # 为每个检测到的数字区域生成处理过程图像
         for i, (digit_img, box, angle) in enumerate(digits_info):
-            std_img = self._enhanced_standardization(digit_img)
-            if std_img is not None:
-                # 将标准化后的图像转换为3通道用于可视化
-                std_img_color = cv2.cvtColor(std_img, cv2.COLOR_GRAY2BGR)
-                # 在图像上添加索引标签
+            # 原始标准化处理
+            std_img = self._enhanced_standardization(digit_img)[0]
+            # 改进的自适应阈值处理（使用高斯滤波器）
+            improved_img = self._conservative_thresholding(digit_img)
+            
+            if std_img is not None and improved_img is not None:
+                # 原始标准化图像 - 放大到60x60
+                std_img_large = cv2.resize(std_img, (60, 60), interpolation=cv2.INTER_NEAREST)
+                std_img_color = cv2.cvtColor(std_img_large, cv2.COLOR_GRAY2BGR)
                 cv2.putText(std_img_color, f"{i}", (5, 15), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
                 self.process_images.append(std_img_color)
+                
+                # 改进阈值处理后的图像 - 放大到60x60
+                improved_img_large = cv2.resize(improved_img, (60, 60), interpolation=cv2.INTER_NEAREST)
+                improved_img_color = cv2.cvtColor(improved_img_large, cv2.COLOR_GRAY2BGR)
+                cv2.putText(improved_img_color, f"{i}", (5, 15), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                self.after_process_images.append(improved_img_color)
         
         # 保存处理过程图像到一张大图
         if self.process_images:
-            self._save_process_images("process.jpg")
+            self._save_process_images(self.process_images, "before_process.jpg", "原始标准化处理")
+        if self.after_process_images:
+            self._save_process_images(self.after_process_images, "after_process.jpg", "改进自适应阈值处理")
         
         # 2. 数字识别
         results = []
@@ -63,19 +78,62 @@ class DigitRecognizer:
         img = 255 - img  # 反色操作（白底黑字 -> 黑底白字）
         return self._sort_results(results), img
 
-    # 保存中间处理过程
-    def _save_process_images(self, output_path):
+    def _conservative_thresholding(self, digit_img):
+        """更保守的自适应阈值处理方法，减少过度过滤"""
+        if len(digit_img.shape) == 3:
+            digit_img = cv2.cvtColor(digit_img, cv2.COLOR_BGR2GRAY)
+        
+        # 应用高斯模糊减少噪声
+        blurred = cv2.GaussianBlur(digit_img, (3, 3), 0)
+        
+        # 使用自适应阈值而不是全局阈值
+        adaptive_thresh = cv2.adaptiveThreshold(
+            blurred, 
+            255, 
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY_INV, 
+            11, 
+            2
+        )
+        
+        # 保留整个自适应阈值结果（不再使用投影过滤）
+        binary = adaptive_thresh
+        
+        # 形态学操作填充小孔洞
+        kernel = np.ones((2, 2), np.uint8)
+        closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+        
+        # 标准化到28x28大小
+        max_dim = max(closed.shape[:2])
+        if max_dim > 0:
+            scale = min(1.0, 20 / max_dim)  # 确保不会放大图像
+            scaled = cv2.resize(closed, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        else:
+            scaled = closed.copy()
+        
+        # 创建28x28画布
+        canvas = np.zeros((28, 28), dtype=np.uint8)
+        y_offset = (28 - scaled.shape[0]) // 2
+        x_offset = (28 - scaled.shape[1]) // 2
+        if y_offset >= 0 and x_offset >= 0 and scaled.shape[0] > 0 and scaled.shape[1] > 0:
+            canvas[y_offset:y_offset+scaled.shape[0], x_offset:x_offset+scaled.shape[1]] = scaled
+        else:
+            canvas = cv2.resize(scaled, (28, 28)) if scaled.size > 0 else canvas
+        
+        return canvas
+
+    def _save_process_images(self, image_list, output_path, title_str):
         """将处理过程图像拼接成一张大图并保存"""
-        if not self.process_images:
+        if not image_list:
             return
             
         # 设置每行图像数量（根据图像数量动态调整）
-        num_images = len(self.process_images)
+        num_images = len(image_list)
         images_per_row = min(10, max(4, int(np.ceil(np.sqrt(num_images)) * 2)))
         num_rows = (num_images + images_per_row - 1) // images_per_row
         
         # 计算大图尺寸
-        img_height, img_width = self.process_images[0].shape[:2]
+        img_height, img_width = image_list[0].shape[:2]
         margin = 5  # 图像间距
         big_img_width = images_per_row * (img_width + margin) - margin
         big_img_height = num_rows * (img_height + margin) - margin
@@ -83,15 +141,20 @@ class DigitRecognizer:
         big_img.fill(255)  # 白色背景
         
         # 拼接图像
-        for i, img in enumerate(self.process_images):
+        for i, img in enumerate(image_list):
             row = i // images_per_row
             col = i % images_per_row
             x_start = col * (img_width + margin)
             y_start = row * (img_height + margin)
+            
+            # 确保图像尺寸一致
+            if img.shape[:2] != (img_height, img_width):
+                img = cv2.resize(img, (img_width, img_height))
+                
             big_img[y_start:y_start+img_height, x_start:x_start+img_width] = img
         
         # 添加标题
-        title = "数字区域标准化处理过程"
+        title = title_str
         font = cv2.FONT_HERSHEY_SIMPLEX
         scale = 0.7
         thickness = 3
@@ -154,7 +217,7 @@ class DigitRecognizer:
         for angle in angles:
             # 应用微调旋转
             rotated = self._rotate_image(digit_img, angle) if angle != 0 else digit_img
-            standardized = self._enhanced_standardization(rotated)
+            standardized = self._enhanced_standardization(rotated)[0]  # 获取第一个返回值（标准化后的图像）
             
             if standardized is None or standardized.size == 0:
                 continue
@@ -254,7 +317,7 @@ class DigitRecognizer:
             contour_area = cv2.contourArea(cnt)
             density = contour_area / rect_area
             
-            # 动态过滤条件 - 添加绝对面积和尺寸约束
+            # 动态过滤 - 添加绝对面积和尺寸约束
             min_area = max(MIN_AREA_PIXELS, img_area * 0.0002)  # 结合相对和绝对阈值
             max_area = img_area * 3
             
@@ -323,7 +386,7 @@ class DigitRecognizer:
                 # 确保收缩后的矩形有效
                 if safe_w > MIN_DIMENSION and safe_h > MIN_DIMENSION:
                     # 使用收缩后的矩形
-                    x, y极, w, h = safe_x, safe_y, safe_w, safe_h
+                    x, y, w, h = safe_x, safe_y, safe_w, safe_h
             
             # 裁剪数字区域（确保在图像范围内）
             x1 = max(0, x)
@@ -342,12 +405,15 @@ class DigitRecognizer:
         return digits
 
     def _enhanced_standardization(self, digit_img):
-        """增强的标准化方法（简化版）"""
+        """增强的标准化方法（使用大津阈值法）"""
         if len(digit_img.shape) == 3:
-            digit_img = cv2.c极Color(digit_img, cv2.COLOR_BGR2GRAY)
+            digit_img = cv2.cvtColor(digit_img, cv2.COLOR_BGR2GRAY)
         
-        # 二值化处理
+        # 使用大津阈值法进行二值化
         _, binary = cv2.threshold(digit_img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        # 保存阈值处理后的图像（未缩放）
+        after_threshold = binary.copy()
         
         # 确保数字图像不会被过度压缩
         max_dim = max(binary.shape[:2])
@@ -368,7 +434,7 @@ class DigitRecognizer:
             # 如果数字太大，直接缩放
             canvas = cv2.resize(scaled, (28, 28))
         
-        return canvas
+        return canvas, after_threshold  # 修改：返回两个图像
 
     def _sort_results(self, results):
         """改进的结果排序（基于旋转矩形中心点）"""

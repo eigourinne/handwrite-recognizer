@@ -17,7 +17,7 @@ def visualize(image, predictions, output_path="result.jpg"):
         
         # 绘制旋转矩形边界框
         cv2.drawContours(img, [box.astype(int)], 0, color, 2)
-        
+
         # 计算中心点用于标签放置
         center_x = int(np.mean(box[:, 0]))
         center_y = int(np.mean(box[:, 1]))
