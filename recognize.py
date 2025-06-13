@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from torchvision import transforms
 from models import EnhancedCNN
+import os
 
 class DigitRecognizer:
     def __init__(self, model_path, device="cuda", debug=False):
@@ -17,9 +18,15 @@ class DigitRecognizer:
             transforms.ToTensor(),
             transforms.Normalize((0.1307,), (0.3081,))
         ])
+        
+        # 用于保存处理过程图像的列表
+        self.process_images = []
 
     def find_and_recognize(self, image_path):
         """主识别流程"""
+        # 重置处理过程图像列表
+        self.process_images = []
+        
         # 1. 图像读取和预处理
         img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         if img is None:
@@ -27,6 +34,21 @@ class DigitRecognizer:
 
         processed = self._advanced_preprocess(img)
         digits_info = self._improved_digit_detection(processed, img)
+        
+        # 为每个检测到的数字区域生成处理过程图像
+        for i, (digit_img, box, angle) in enumerate(digits_info):
+            std_img = self._enhanced_standardization(digit_img)
+            if std_img is not None:
+                # 将标准化后的图像转换为3通道用于可视化
+                std_img_color = cv2.cvtColor(std_img, cv2.COLOR_GRAY2BGR)
+                # 在图像上添加索引标签
+                cv2.putText(std_img_color, f"{i}", (5, 15), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                self.process_images.append(std_img_color)
+        
+        # 保存处理过程图像到一张大图
+        if self.process_images:
+            self._save_process_images("process.jpg")
         
         # 2. 数字识别
         results = []
@@ -40,6 +62,51 @@ class DigitRecognizer:
         # 3. 后处理和结果返回
         img = 255 - img  # 反色操作（白底黑字 -> 黑底白字）
         return self._sort_results(results), img
+
+    # 保存中间处理过程
+    def _save_process_images(self, output_path):
+        """将处理过程图像拼接成一张大图并保存"""
+        if not self.process_images:
+            return
+            
+        # 设置每行图像数量（根据图像数量动态调整）
+        num_images = len(self.process_images)
+        images_per_row = min(10, max(4, int(np.ceil(np.sqrt(num_images)) * 2)))
+        num_rows = (num_images + images_per_row - 1) // images_per_row
+        
+        # 计算大图尺寸
+        img_height, img_width = self.process_images[0].shape[:2]
+        margin = 5  # 图像间距
+        big_img_width = images_per_row * (img_width + margin) - margin
+        big_img_height = num_rows * (img_height + margin) - margin
+        big_img = np.zeros((big_img_height, big_img_width, 3), dtype=np.uint8)
+        big_img.fill(255)  # 白色背景
+        
+        # 拼接图像
+        for i, img in enumerate(self.process_images):
+            row = i // images_per_row
+            col = i % images_per_row
+            x_start = col * (img_width + margin)
+            y_start = row * (img_height + margin)
+            big_img[y_start:y_start+img_height, x_start:x_start+img_width] = img
+        
+        # 添加标题
+        title = "数字区域标准化处理过程"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 0.7
+        thickness = 3
+        (title_width, title_height), _ = cv2.getTextSize(title, font, scale, thickness)
+        title_x = (big_img_width - title_width) // 2
+        
+        # 创建带标题的大图
+        titled_img = np.zeros((big_img_height + title_height + 20, big_img_width, 3), dtype=np.uint8)
+        titled_img.fill(255)  # 白色背景
+        cv2.putText(titled_img, title, (title_x, title_height + 10), font, scale, (0, 0, 0), thickness)
+        titled_img[title_height + 20:, :] = big_img
+        
+        # 保存图像
+        cv2.imwrite(output_path, titled_img)
+        print(f"处理过程图像已保存至: {os.path.abspath(output_path)}")
 
     def _correct_and_recognize(self, digit_img, rect_angle):
         """根据旋转矩形的角度智能校正并识别"""
@@ -71,7 +138,6 @@ class DigitRecognizer:
         
         return best_angle, best_conf, best_pred
 
-    # 保留了对旋转矩阵的提取
     def _find_best_rotation(self, digit_img, base_angle=0):
         """在有限角度范围内寻找最佳旋转"""
         best_angle = 0
@@ -102,16 +168,16 @@ class DigitRecognizer:
                 output = self.model(tensor)
                 probs = torch.softmax(output, dim=1)
                 
-                # ========== 新增：对 '8' 和 '0' 等特殊数字的特殊处理 ==========
+                # ========== 新增：对 '8' 和 '0' 等在本次识别易混淆的特殊数字的经验处理 ==========
                 # 获取数字的原始置信度
                 conf_0 = probs[0, 0].item()
                 conf_8 = probs[0, 8].item()
                 conf_3 = probs[0, 3].item()
                 conf_9 = probs[0, 9].item()
                 
-                # 特殊处理
+                # 根据经验进行特殊处理
                 if conf_3 > 0.5 and conf_3 > conf_9 and conf_9 > 0.1:
-                    probs[0, 9] = conf_3 + 0.5
+                    probs[0, 9] = conf_3 + 0.4
                 elif conf_0 > 0.5 and conf_0 > conf_8 and conf_0 < 0.95:
                     probs[0, 8] = conf_8 + 1
                     # 重新归一化概率分布
@@ -190,7 +256,7 @@ class DigitRecognizer:
             
             # 动态过滤条件 - 添加绝对面积和尺寸约束
             min_area = max(MIN_AREA_PIXELS, img_area * 0.0002)  # 结合相对和绝对阈值
-            max_area = img_area * 0.3
+            max_area = img_area * 3
             
             # 检查尺寸是否过小
             min_dimension = min(width, height)
@@ -257,7 +323,7 @@ class DigitRecognizer:
                 # 确保收缩后的矩形有效
                 if safe_w > MIN_DIMENSION and safe_h > MIN_DIMENSION:
                     # 使用收缩后的矩形
-                    x, y, w, h = safe_x, safe_y, safe_w, safe_h
+                    x, y极, w, h = safe_x, safe_y, safe_w, safe_h
             
             # 裁剪数字区域（确保在图像范围内）
             x1 = max(0, x)
@@ -278,7 +344,7 @@ class DigitRecognizer:
     def _enhanced_standardization(self, digit_img):
         """增强的标准化方法（简化版）"""
         if len(digit_img.shape) == 3:
-            digit_img = cv2.cvtColor(digit_img, cv2.COLOR_BGR2GRAY)
+            digit_img = cv2.c极Color(digit_img, cv2.COLOR_BGR2GRAY)
         
         # 二值化处理
         _, binary = cv2.threshold(digit_img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
