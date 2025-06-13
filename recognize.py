@@ -101,6 +101,23 @@ class DigitRecognizer:
             with torch.no_grad():
                 output = self.model(tensor)
                 probs = torch.softmax(output, dim=1)
+                
+                # ========== 新增：对 '8' 和 '0' 等特殊数字的特殊处理 ==========
+                # 获取数字的原始置信度
+                conf_0 = probs[0, 0].item()
+                conf_8 = probs[0, 8].item()
+                conf_3 = probs[0, 3].item()
+                conf_9 = probs[0, 9].item()
+                
+                # 特殊处理
+                if conf_3 > 0.5 and conf_3 > conf_9 and conf_9 > 0.1:
+                    probs[0, 9] = conf_3 + 0.5
+                elif conf_0 > 0.5 and conf_0 > conf_8 and conf_0 < 0.95:
+                    probs[0, 8] = conf_8 + 1
+                    # 重新归一化概率分布
+                    probs = probs / probs.sum(dim=1, keepdim=True)
+                    # ========== 结束新增 ==========
+                
                 conf, pred = torch.max(probs, dim=1)
                 confidence = conf.item()
                 
@@ -154,6 +171,7 @@ class DigitRecognizer:
         # 增加最小面积约束 (绝对像素值)
         MIN_AREA_PIXELS = 80  # x 像素以下的区域直接忽略
         MIN_DIMENSION = 5     # 最小宽度/高度要求
+        SAFETY_MARGIN = 0     # 安全边界阈值（像素）
         
         for cnt in contours:
             # 使用旋转矩形代替水平矩形
@@ -210,6 +228,8 @@ class DigitRecognizer:
         
         # ROI提取（使用旋转矩形的最小外接矩形）
         digits = []
+        img_h, img_w = original_img.shape[:2]  # 获取图像尺寸
+        
         for (rect, box) in filtered_rects:
             # 获取旋转矩形的参数
             center, (width, height), angle = rect
@@ -221,12 +241,37 @@ class DigitRecognizer:
             # 获取最小外接矩形
             x, y, w, h = cv2.boundingRect(box)
             
-            # 裁剪数字区域
-            digit_img = original_img[y:y+h, x:x+w]
+            # 检查是否超出边界 - 新增安全边界处理
+            out_of_bounds = False
+            if x < 0 or y < 0 or (x + w) > img_w or (y + h) > img_h:
+                out_of_bounds = True
+                
+            # 应用安全边界：如果超出边界，则向内收缩SAFETY_MARGIN像素
+            if out_of_bounds:
+                # 计算向内收缩的矩形
+                safe_x = max(0, x) + SAFETY_MARGIN
+                safe_y = max(0, y) + SAFETY_MARGIN
+                safe_w = max(0, w - 2 * SAFETY_MARGIN)
+                safe_h = max(0, h - 2 * SAFETY_MARGIN)
+                
+                # 确保收缩后的矩形有效
+                if safe_w > MIN_DIMENSION and safe_h > MIN_DIMENSION:
+                    # 使用收缩后的矩形
+                    x, y, w, h = safe_x, safe_y, safe_w, safe_h
             
-            if digit_img.size > 0 and digit_img.shape[0] > 5 and digit_img.shape[1] > 5:
-                # 返回数字图像、边界框和旋转角度
-                digits.append((digit_img, box, angle))
+            # 裁剪数字区域（确保在图像范围内）
+            x1 = max(0, x)
+            y1 = max(0, y)
+            x2 = min(img_w, x + w)
+            y2 = min(img_h, y + h)
+            
+            # 检查有效区域
+            if x2 > x1 and y2 > y1 and (x2 - x1) > MIN_DIMENSION and (y2 - y1) > MIN_DIMENSION:
+                digit_img = original_img[y1:y2, x1:x2]
+                
+                if digit_img.size > 0:
+                    # 返回数字图像、边界框和旋转角度
+                    digits.append((digit_img, box, angle))
         
         return digits
 
