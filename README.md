@@ -26,3 +26,12 @@ how to use:
 1. run train.py to train the classifier
 2. run main.py, after that you need to input the path of picture, then it will use recognizer and classier to detect the picture and save the result
 #
+
+#
+example:
+input picture:
+![image](https://github.com/user-attachments/assets/0831cc29-4804-42d3-9d35-075429404d9f)
+output picture:
+![image](https://github.com/user-attachments/assets/0e80acfc-ef91-4bf6-85ec-804dcc3305eb)
+
+#
