@@ -30,8 +30,11 @@ how to use:
 #
 example:
 input picture:
+
 ![image](https://github.com/user-attachments/assets/0831cc29-4804-42d3-9d35-075429404d9f)
+
 output picture:
+
 ![image](https://github.com/user-attachments/assets/0e80acfc-ef91-4bf6-85ec-804dcc3305eb)
 
 #
