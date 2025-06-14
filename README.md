@@ -13,10 +13,13 @@ by the way, divide.py and rotate.py are used for manly adjust origin picture, be
 #
 requirements:
 - pytorch
+- python-pytorch-cuda
+- nccl
 - torchvision
 - PIL
-- conda/...(virtual environment)
+- miniconda3/...(virtual environment)
 - cuda
+- opencv
 - python-opencv
 - etc...
 #
