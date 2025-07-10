@@ -7,10 +7,10 @@
 
 ## structure
 
-- models.py:the resnet-cnn network
-- train.py:use mnist databases to train the classifier
-- recognize.py:detect and resize, then pass the zone of numbers to classifier
-- main.py:use trained classifier to judge the detected numbers, then draw them using opencv
+- models.py --> the resnet-cnn network
+- train.py --> use mnist databases to train the classifier
+- recognize.py --> detect and resize, then pass the zone of numbers to classifier
+- main.py --> use trained classifier to judge the detected numbers, then draw them using opencv
 
 ## requirements:
 
