@@ -6,7 +6,12 @@ the classifier based on res-cnn (channel attention + spiral attention) network, 
 
 the recognizer use opencv's findcontour method to find the place of numbers in the picture, then use rotate rectangle to detect the zone, reshape it to 28*28 pixels and pass it to the classifier
 
-by the way, divide.py and rotate.py are used for manly adjust origin picture, because the recognizer based on traditional machine learning (ML) method, can't solve too complex picture
+## structure
+
+- models.py:the resnet-cnn network
+- train.py:use mnist databases to train the classifier
+- recognize.py:detect and resize, then pass the zone of numbers to classifier
+- main.py:use trained classifier to judge the detected numbers, then draw them using opencv
 
 ## requirements:
 
