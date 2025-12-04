@@ -231,22 +231,6 @@ class DigitRecognizer:
                 output = self.model(tensor)
                 probs = torch.softmax(output, dim=1)
                 
-                # ========== 新增：对 '8' 和 '0' 等在本次识别易混淆的特殊数字的经验处理 ==========
-                # 获取数字的原始置信度
-                conf_0 = probs[0, 0].item()
-                conf_8 = probs[0, 8].item()
-                conf_3 = probs[0, 3].item()
-                conf_9 = probs[0, 9].item()
-                
-                # 根据经验进行特殊处理
-                if conf_3 > 0.5 and conf_3 > conf_9 and conf_9 > 0.1:
-                    probs[0, 9] = conf_3 + 0.4
-                elif conf_0 > 0.5 and conf_0 > conf_8 and conf_0 < 0.95:
-                    probs[0, 8] = conf_8 + 1
-                    # 重新归一化概率分布
-                    probs = probs / probs.sum(dim=1, keepdim=True)
-                    # ========== 结束新增 ==========
-                
                 conf, pred = torch.max(probs, dim=1)
                 confidence = conf.item()
                 
