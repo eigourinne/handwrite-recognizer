@@ -2,6 +2,10 @@
 
 ## the project mainly consists of a recognizer and a classifier:
 
+- made by maou
+
+- 2025.6
+
 - classifier:based on res-cnn (channel attention + spiral attention) network, trained by enhanced-mnist handwrite-numbers databases(randomly rotate or erase or add guass blur)
 - recognizer:use opencv's findcontour method to find the place of numbers in the picture, then use rotate rectangle to detect the zone, reshape it to 28*28 pixels and pass it to the classifier
 
